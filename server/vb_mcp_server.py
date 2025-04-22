@@ -150,6 +150,4 @@ def build_and_run_code(entry, release, args=[], input=None, iterations=100, prof
 if __name__ == "__main__":
     # Start the server
     print("Starting Vibebolt server...")
-    print("Workspace root:", WORKSPACE_ROOT)
-    print("Artifact root:", ARTIFACT_ROOT)
     mcp.run()
