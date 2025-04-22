@@ -79,8 +79,16 @@ def clear_artifact_cache():
 @mcp.tool()
 def build_and_run_code(entry, release, args=[], input=None, iterations=100, profile=True) -> Dict:
     """
-    Sends the contents of the current workspace to a docker container for
-    end to end processing, and then returns results.
+    Compiles the contents of the current workspace inside a docker container using `rustc`, and then
+    runs the compiled binary with the provided arguments and input. Returns the logs, exit code, and metrics for the build and run.
+
+    Args:
+        entry (str): The path to the Rust source file to compile, relative to the workspace root.
+        release (bool): Whether to build in release mode.
+        args (List[str]): Arguments to pass to the compiled binary.
+        input (str): Input to pass to the compiled binary.
+        iterations (int): Number of iterations to run the binary for. (Unimplemented)
+        profile (bool): Whether to profile the run. (Unimplemented)
     """
     # Resolve path in workspace
     src = os.path.normpath(os.path.join(WORKSPACE_ROOT, entry))
