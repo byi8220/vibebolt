@@ -152,4 +152,4 @@ if __name__ == "__main__":
     print("Starting Vibebolt server...")
     print("Workspace root:", WORKSPACE_ROOT)
     print("Artifact root:", ARTIFACT_ROOT)
-    mcp.start()
+    mcp.run()
