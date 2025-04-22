@@ -1,3 +1,147 @@
 import os
-DEFAULT_WORKSPACE_ROOT = "/tmp/vibebolt/workspace"
+from typing import List, Dict
+import sys
+from fastmcp import FastMCP
+import docker
 
+DOCKER_IMAGE   = "rust:latest"
+
+# TODO: Generalize this into a better workspace system
+WORKSPACE_ROOT = "/tmp/vibebolt/workspace"
+ARTIFACT_ROOT = "/tmp/vibebolt/artifacts"
+# Ensure the workspace and artifact directories exist
+os.makedirs(WORKSPACE_ROOT, exist_ok=True)
+os.makedirs(ARTIFACT_ROOT, exist_ok=True)
+
+
+mcp = FastMCP("Vibebolt Server")
+docker_client = docker.from_env()
+
+@mcp.resource("file://{path}")
+def file_read(path: str) -> str:
+    # Prevent escaping the workspace:
+    full = os.path.normpath(os.path.join(WORKSPACE_ROOT, path))
+    if not full.startswith(WORKSPACE_ROOT):
+        raise ValueError("Path outside workspace")
+    with open(full, "r") as f:
+        return f.read()
+    
+@mcp.tool()
+def file_write(path: str, content: str) -> bool:
+    full = os.path.normpath(os.path.join(WORKSPACE_ROOT, path))
+    if not full.startswith(WORKSPACE_ROOT):
+        raise ValueError("Path outside workspace")
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w") as f:
+        f.write(content)
+    return True
+
+@mcp.tool()
+def file_delete(path: str) -> bool:
+    full = os.path.normpath(os.path.join(WORKSPACE_ROOT, path))
+    if not full.startswith(WORKSPACE_ROOT):
+        raise ValueError("Path outside workspace")
+    os.remove(full)
+    return True
+
+@mcp.tool()
+def reset_workspace():
+    """
+    Cleans the workspace by removing all files and directories.
+    """
+    for root, dirs, files in os.walk(WORKSPACE_ROOT, topdown=False):
+        for name in files:
+            os.remove(os.path.join(root, name))
+        for name in dirs:
+            os.rmdir(os.path.join(root, name))
+    return True
+
+@mcp.tool()
+def file_list(dir_path: str) -> List[str]:
+    "List all files in workspace"
+    full = os.path.normpath(os.path.join(WORKSPACE_ROOT, dir_path))
+    if not full.startswith(WORKSPACE_ROOT):
+        raise ValueError("Path outside workspace")
+    return os.listdir(full)
+
+
+def clear_artifact_cache():
+    """
+    Cleans the artifact cache by removing all files and directories.
+    """
+    for root, dirs, files in os.walk(ARTIFACT_ROOT, topdown=False):
+        for name in files:
+            os.remove(os.path.join(root, name))
+        for name in dirs:
+            os.rmdir(os.path.join(root, name))
+
+# Yes, this lets AI execute arbitrary code. But we trust them, right?
+@mcp.tool()
+def build_and_run_code(entry, release, args=[], input=None, iterations=100, profile=True) -> Dict:
+    """
+    Sends the contents of the current workspace to a docker container for
+    end to end processing, and then returns results.
+    """
+    # Resolve path in workspace
+    src = os.path.normpath(os.path.join(WORKSPACE_ROOT, entry))
+    if not src.startswith(WORKSPACE_ROOT):
+        raise ValueError("Entry path outside workspace")
+    # Pre-run clear artifact cache
+    clear_artifact_cache()
+
+    # Prepare build command
+    binary_artifact = "/artifacts/bin/a.out"
+    build_cmd = ["rustc", entry, "-o", binary_artifact] + (["--release"] if release else [])
+
+    # Containerize build
+    build_container = docker_client.containers.run(
+        DOCKER_IMAGE,
+        command=build_cmd,
+        volumes={
+            WORKSPACE_ROOT: {
+                "bind": "/workspace",
+                "mode": "ro"
+            },
+            ARTIFACT_ROOT: {
+                "bind": "/artifacts",
+                "mode": "rw"
+            }
+        },
+        working_dir="/workspace",
+        network_disabled=True,
+    )
+
+    build_logs = build_container.logs(stdout=True, stderr=True).decode()
+    build_code = build_container.wait()["StatusCode"]
+    results = {
+            "build_success": build_code == 0,
+            "build_logs": build_logs,
+            "build_code": build_code
+    }
+    if not results["build_success"]:
+        # Build failed, return logs
+        return results
+
+    # Post run clear artifact cache
+    run_cmd = ["/artifacts/bin/a.out"] + args
+    if input:
+        run_cmd += ["<", input]
+    run_container = docker_client.containers.run(
+        DOCKER_IMAGE,
+        command=[" ".join(run_cmd)],
+        volumes={
+            ARTIFACT_ROOT: {
+                "bind": "/artifacts",
+                "mode": "rw"
+            }
+        },
+        working_dir="/artifacts",
+        network_disabled=True,
+    )
+
+    run_logs = run_container.logs(stdout=True, stderr=True).decode()
+    run_code = run_container.wait()["StatusCode"]
+    results["run_logs"] = run_logs
+    results["run_code"] = run_code
+
+    return results
