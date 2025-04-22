@@ -19,6 +19,13 @@ docker_client = docker.from_env()
 
 @mcp.resource("file://{path}")
 def file_read(path: str) -> str:
+    """
+    Read a file from the workspace.
+    Args:
+        path (str): Relative path to the file to read, relative to the workspace root.
+    """
+    if os.path.isabs(path):
+        raise ValueError("`path` must be relative")
     # Prevent escaping the workspace:
     full = os.path.normpath(os.path.join(WORKSPACE_ROOT, path))
     if not full.startswith(WORKSPACE_ROOT):
@@ -28,6 +35,14 @@ def file_read(path: str) -> str:
     
 @mcp.tool()
 def file_write(path: str, content: str) -> bool:
+    """
+    Write content to a file in the workspace. If the file exists, it will be overwritten.
+    Args:
+        path (str): Relative path to the file to write, relative to the workspace root.
+        content (str): The content to write to the file.
+    """
+    if os.path.isabs(path):
+        raise ValueError("`path` must be relative")
     full = os.path.normpath(os.path.join(WORKSPACE_ROOT, path))
     if not full.startswith(WORKSPACE_ROOT):
         raise ValueError("Path outside workspace")
@@ -38,6 +53,13 @@ def file_write(path: str, content: str) -> bool:
 
 @mcp.tool()
 def file_delete(path: str) -> bool:
+    """
+    Delete a file in the workspace.
+    Args:
+        path (str): Relative path to the file to delete, relative to the workspace root.
+    """
+    if os.path.isabs(path):
+        raise ValueError("`path` must be relative")
     full = os.path.normpath(os.path.join(WORKSPACE_ROOT, path))
     if not full.startswith(WORKSPACE_ROOT):
         raise ValueError("Path outside workspace")
@@ -91,6 +113,8 @@ def build_and_run_code(entry, release, args=[], input=None, iterations=100, prof
         profile (bool): Whether to profile the run. (Unimplemented)
     """
     # Resolve path in workspace
+    if os.path.isabs(entry):
+        raise ValueError("`entry` must be relative")
     src = os.path.normpath(os.path.join(WORKSPACE_ROOT, entry))
     if not src.startswith(WORKSPACE_ROOT):
         raise ValueError("Entry path outside workspace")
