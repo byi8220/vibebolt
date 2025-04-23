@@ -2,7 +2,7 @@ import os
 import platform
 import re
 from typing import List, Dict
-from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
 import docker
 import io
 import tarfile
@@ -11,8 +11,8 @@ import uuid
 DOCKER_IMAGE   = "rust:latest"
 
 # TODO: Generalize this into a better workspace system
-WORKSPACE_ROOT = os.path.normpath("/tmp/vibebolt/workspace")
-ARTIFACT_ROOT = os.path.normpath("/tmp/vibebolt/artifacts")
+WORKSPACE_ROOT = os.path.normpath("~/tmp/vibebolt/workspace")
+ARTIFACT_ROOT = os.path.normpath("~/tmp/vibebolt/artifacts")
 # Ensure the workspace and artifact directories exist
 os.makedirs(WORKSPACE_ROOT, exist_ok=True)
 os.makedirs(ARTIFACT_ROOT, exist_ok=True)
