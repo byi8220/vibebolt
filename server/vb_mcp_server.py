@@ -144,7 +144,9 @@ class DockerVolume:
 
 # Yes, this lets AI execute arbitrary code. But we trust them, right?
 @mcp.tool()
-def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[], input=None, iterations=100, profile=True, delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
+def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[], 
+                       build_env_vars={}, run_env_vars={},
+                       input=None, iterations=100, profile=True, delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
     """
     Compiles the contents of the current workspace inside a docker container using `rustc`, and then
     runs the compiled binary with the provided arguments and input. Returns the logs, exit code, and metrics for the build and run.
@@ -154,6 +156,8 @@ def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[], input
         opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "0")
         compile_args (List[str]): Arguments to pass to the Rust compiler.
         run_args (List[str]): Arguments to pass to the compiled binary.
+        build_env_vars (Dict[str, str]): Environment variables to set for the build container.
+        run_env_vars (Dict[str, str]): Environment variables to set for the run container.
         input (str): Input to pass to the compiled binary.
         iterations (int): Number of iterations to run the binary for. (Unimplemented)
         profile (bool): Whether to profile the run. (Unimplemented)
@@ -229,6 +233,7 @@ def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[], input
                         "mode": "rw"
                     },
                 },
+                environment=build_env_vars,
                 working_dir="/workspace",
                 network_disabled=True,
                 detach=True,
@@ -269,6 +274,7 @@ def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[], input
                         "mode": "rw"
                     }
                 },
+                environment=run_env_vars,
                 working_dir="/workspace",
                 network_disabled=True,
                 detach=True,
