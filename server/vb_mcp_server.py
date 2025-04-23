@@ -122,14 +122,14 @@ def fix_docker_volume_path(path_str):
 
 # Yes, this lets AI execute arbitrary code. But we trust them, right?
 @mcp.tool()
-def build_and_run_code(entry, release, args=[], input=None, iterations=100, profile=True) -> Dict:
+def build_and_run_code(entry, opt_level="O0", args=[], input=None, iterations=100, profile=True) -> Dict:
     """
     Compiles the contents of the current workspace inside a docker container using `rustc`, and then
     runs the compiled binary with the provided arguments and input. Returns the logs, exit code, and metrics for the build and run.
 
     Args:
         entry (str): The path to the Rust source file to compile, relative to the workspace root.
-        release (bool): Whether to build in release mode.
+        opt_level (str): The optimization level to use for the Rust compiler. (default: "O0")
         args (List[str]): Arguments to pass to the compiled binary.
         input (str): Input to pass to the compiled binary.
         iterations (int): Number of iterations to run the binary for. (Unimplemented)
@@ -146,7 +146,7 @@ def build_and_run_code(entry, release, args=[], input=None, iterations=100, prof
 
     # Prepare build command
     binary_artifact = "/artifacts/bin/a.out"
-    build_cmd = ["rustc", entry, "-o", binary_artifact] + (["--release"] if release else [])
+    build_cmd = ["rustc", entry, "-o", binary_artifact] + ["-C", f"opt-level={opt_level}"]
 
     docker_workspace = fix_docker_volume_path(WORKSPACE_ROOT)
     docker_artifacts = fix_docker_volume_path(ARTIFACT_ROOT)
