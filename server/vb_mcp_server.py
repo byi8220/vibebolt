@@ -1,5 +1,6 @@
 import os
 import platform
+import re
 from typing import List, Dict
 import sys
 from fastmcp import FastMCP
