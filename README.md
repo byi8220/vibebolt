@@ -1,14 +1,18 @@
 # vibebolt
 Vibe code some Rust!
 
-Vibebolt is an experimental vibe coding framework that specializes in tuning the performance of Rust code.
+Vibebolt is an experimental MCP vibe coding framework that specializes in tuning the performance of Rust code.
+
 
 ### Prerequisites
-Python 3 (TODO: Figure out minimum working version)
-[`uv`](https://github.com/astral-sh/uv) package manager.
+- [Docker](https://docs.docker.com/get-docker/) installed and running.
+- [`uv`](https://github.com/astral-sh/uv) package manager.
+- Python 3.10 or higher
 
-### Setup
-TODO: Add setup guide
+### Install
 
-### Usage
-TODO: Add usage guide
+Install with the [`uv`](https://github.com/astral-sh/uv) package manager
+
+TODO: Add install guide
+
+
