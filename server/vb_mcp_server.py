@@ -144,9 +144,9 @@ class DockerVolume:
 
 # Yes, this lets AI execute arbitrary code. But we trust them, right?
 @mcp.tool()
-def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[], 
-                       build_env_vars={}, run_env_vars={},
-                       input=None, iterations=100, profile=True, delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
+def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[], input=None,
+                       build_env_vars={}, run_env_vars={}, additional_compiler_outputs=[],
+                       iterations=100, profile=True, delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
     """
     Compiles the contents of the current workspace inside a docker container using `rustc`, and then
     runs the compiled binary with the provided arguments and input. Returns the logs, exit code, and metrics for the build and run.
@@ -156,9 +156,10 @@ def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[],
         opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "0")
         compile_args (List[str]): Arguments to pass to the Rust compiler.
         run_args (List[str]): Arguments to pass to the compiled binary.
+        input (str): Input to pass to the compiled binary.
         build_env_vars (Dict[str, str]): Environment variables to set for the build container.
         run_env_vars (Dict[str, str]): Environment variables to set for the run container.
-        input (str): Input to pass to the compiled binary.
+        additional_compiler_outputs (List[str]): Additional compiler outputs to emit. Possible values are "llvm_ir", "asm", "mir".
         iterations (int): Number of iterations to run the binary for. (Unimplemented)
         profile (bool): Whether to profile the run. (Unimplemented)
         delete_volumes_on_exit (bool): Whether to delete the volumes after use.
@@ -219,7 +220,18 @@ def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[],
         # Containerize build
         # Prepare build command
         binary_artifact = "/workspace/artifacts/a.out"
-        build_cmd = ["rustc", entry, "-o", binary_artifact] + ["-C", f"opt-level={opt_level}"] + compile_args
+        emission_types = []
+        modified_compile_args = compile_args.copy()
+        if "llvm_ir" in additional_compiler_outputs:
+            emission_types.append("llvm-ir")
+        if "asm" in additional_compiler_outputs:
+            emission_types.append("asm")
+        if "mir" in additional_compiler_outputs:
+            emission_types.append("mir")
+        
+        if emission_types:
+            modified_compile_args.extend(["--emit", ",".join(emission_types)])
+        build_cmd = ["rustc", entry, "-o", binary_artifact] + ["-C", f"opt-level={opt_level}"] + modified_compile_args
 
         build_container = None
         try:
@@ -288,5 +300,99 @@ def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[],
             # Ensure the container is removed after use
             if run_container:
                 run_container.remove(force=True)
+
+        # Collect additional outputs if requested
+        def extract_file_from_archive(archive_bits):
+            """Extract the content of a file from a Docker archive."""
+            file_data = io.BytesIO()
+            for chunk in archive_bits:
+                file_data.write(chunk)
+            file_data.seek(0)
+            
+            with tarfile.open(fileobj=file_data) as tar:
+                # The file will be inside a directory in the archive
+                for member in tar.getmembers():
+                    if member.isfile():  # Only interested in files
+                        f = tar.extractfile(member)
+                        if f:
+                            return f.read().decode('utf-8')
+            return None
+
+        if any(output_type in additional_compiler_outputs for output_type in ["llvm_ir", "asm", "mir"]):
+            # Create a container to extract the files
+            extractor_container = None
+            try:
+                extractor_container = docker_client.containers.run(
+                    DOCKER_IMAGE,
+                    name=f"extractor_container_{session_id}",
+                    command="sleep 10",  # Give it enough time to extract files
+                    volumes={
+                        volume_name: {
+                            "bind": "/workspace",
+                            "mode": "ro"  # Read-only access is sufficient
+                        }
+                    },
+                    working_dir="/workspace",
+                    network_disabled=True,
+                    detach=True,
+                )
+                
+                # Get the base name of the entry file (without extension)
+                base_name = os.path.splitext(entry)[0]
+                additional_outputs = {}
+                
+                # Extract and process each requested output type
+                if "llvm_ir" in additional_compiler_outputs:
+                    ir_path = f"{base_name}.ll"
+                    # Get the LLVM IR file from the container
+                    try:
+                        # First check if file exists
+                        exit_code, _ = extractor_container.exec_run(f"test -f {ir_path}")
+                        if exit_code == 0:  # File exists
+                            bits, _ = extractor_container.get_archive(f"/workspace/{ir_path}")
+                            # Extract the file content
+                            file_content = extract_file_from_archive(bits)
+                            if file_content:
+                                additional_outputs["llvm_ir"] = file_content
+                    except Exception as e:
+                        print(f"Error extracting LLVM IR: {e}")
+                
+                if "asm" in additional_compiler_outputs:
+                    asm_path = f"{base_name}.s"
+                    # Get the assembly file from the container
+                    try:
+                        exit_code, _ = extractor_container.exec_run(f"test -f {asm_path}")
+                        if exit_code == 0:  # File exists
+                            bits, _ = extractor_container.get_archive(f"/workspace/{asm_path}")
+                            # Extract the file content
+                            file_content = extract_file_from_archive(bits)
+                            if file_content:
+                                additional_outputs["asm"] = file_content
+                    except Exception as e:
+                        print(f"Error extracting assembly: {e}")
+                
+                if "mir" in additional_compiler_outputs:
+                    mir_path = f"{base_name}.mir"
+                    # Get the MIR file from the container
+                    try:
+                        exit_code, _ = extractor_container.exec_run(f"test -f {mir_path}")
+                        if exit_code == 0:  # File exists
+                            bits, _ = extractor_container.get_archive(f"/workspace/{mir_path}")
+                            # Extract the file content
+                            file_content = extract_file_from_archive(bits)
+                            if file_content:
+                                additional_outputs["mir"] = file_content
+                    except Exception as e:
+                        print(f"Error extracting MIR: {e}")
+                
+                # Add the additional outputs to the results
+                if additional_outputs:
+                    results["additional_outputs"] = additional_outputs
+                    
+            finally:
+                # Ensure the container is removed after use
+                if extractor_container and delete_containers_on_exit:
+                    extractor_container.remove(force=True)
+
 
         return results
