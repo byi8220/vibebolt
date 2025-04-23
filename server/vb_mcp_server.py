@@ -1,4 +1,5 @@
 import os
+import platform
 from typing import List, Dict
 import sys
 from fastmcp import FastMCP
@@ -97,6 +98,27 @@ def clear_artifact_cache():
         for name in dirs:
             os.rmdir(os.path.join(root, name))
 
+def fix_docker_volume_path(path_str):
+    """
+    Convert a host path to Docker-compatible volume mount format,
+    especially important for Windows compatibility.
+    """
+    # Normalize path first
+    path_str = os.path.normpath(path_str)
+    
+    if platform.system() == "Windows":
+        # Handle Windows drive letters for Docker (C:\ -> /c/)
+        if re.match(r'^[A-Za-z]:\\', path_str):
+            drive_letter = path_str[0].lower()
+            path_without_drive = path_str[2:].replace('\\', '/')
+            return f"/{drive_letter}{path_without_drive}"
+        else:
+            # Handle other Windows paths - replace backslashes
+            return path_str.replace('\\', '/')
+    
+    # Non-Windows paths are returned as-is
+    return path_str
+
 # Yes, this lets AI execute arbitrary code. But we trust them, right?
 @mcp.tool()
 def build_and_run_code(entry, release, args=[], input=None, iterations=100, profile=True) -> Dict:
@@ -125,16 +147,18 @@ def build_and_run_code(entry, release, args=[], input=None, iterations=100, prof
     binary_artifact = "/artifacts/bin/a.out"
     build_cmd = ["rustc", entry, "-o", binary_artifact] + (["--release"] if release else [])
 
+    docker_workspace = fix_docker_volume_path(WORKSPACE_ROOT)
+    docker_artifacts = fix_docker_volume_path(ARTIFACT_ROOT)
     # Containerize build
     build_container = docker_client.containers.run(
         DOCKER_IMAGE,
         command=build_cmd,
         volumes={
-            WORKSPACE_ROOT: {
+            docker_workspace: {
                 "bind": "/workspace",
                 "mode": "ro"
             },
-            ARTIFACT_ROOT: {
+            docker_artifacts: {
                 "bind": "/artifacts",
                 "mode": "rw"
             }
@@ -155,14 +179,23 @@ def build_and_run_code(entry, release, args=[], input=None, iterations=100, prof
         return results
 
     # Post run clear artifact cache
-    run_cmd = ["/artifacts/bin/a.out"] + args
+    # Fix for input redirection
     if input:
-        run_cmd += ["<", input]
+        # Create an input file instead of using shell redirection
+        input_file = os.path.join(ARTIFACT_ROOT, "input.txt")
+        with open(input_file, "w") as f:
+            f.write(input)
+        
+        # Use shell to handle input redirection
+        run_cmd = ["sh", "-c", f"/artifacts/bin/a.out {' '.join(args)} < /artifacts/input.txt"]
+    else:
+        run_cmd = ["/artifacts/bin/a.out"] + args
+
     run_container = docker_client.containers.run(
         DOCKER_IMAGE,
         command=[" ".join(run_cmd)],
         volumes={
-            ARTIFACT_ROOT: {
+            docker_artifacts: {
                 "bind": "/artifacts",
                 "mode": "rw"
             }
