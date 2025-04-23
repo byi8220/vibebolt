@@ -2,9 +2,11 @@ import os
 import platform
 import re
 from typing import List, Dict
-import sys
 from fastmcp import FastMCP
 import docker
+import io
+import tarfile
+import uuid
 
 DOCKER_IMAGE   = "rust:latest"
 
@@ -14,7 +16,6 @@ ARTIFACT_ROOT = os.path.normpath("/tmp/vibebolt/artifacts")
 # Ensure the workspace and artifact directories exist
 os.makedirs(WORKSPACE_ROOT, exist_ok=True)
 os.makedirs(ARTIFACT_ROOT, exist_ok=True)
-
 
 mcp = FastMCP("Vibebolt Server")
 docker_client = docker.from_env()
@@ -120,9 +121,30 @@ def fix_docker_volume_path(path_str):
     # Non-Windows paths are returned as-is
     return path_str
 
+class DockerVolume:
+    """
+    Context manager which creates and destroys a docker volume.
+    """
+    def __init__(self, delete_on_exit=True, volume_name=None):
+        self.volume_name = volume_name
+        self.delete_on_exit = delete_on_exit
+
+    def __enter__(self):
+        # Create the volume mount
+        if self.volume_name is None:
+            self.session_id = str(uuid.uuid4())
+            self.volume_name = f"vibebolt_volume_{self.session_id}"
+            self.volume = docker_client.volumes.create(self.volume_name)
+        return self.volume_name, self.session_id
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # Clean up the volume mount
+        if self.delete_on_exit:
+            docker_client.volumes.get(self.volume_name).remove(force=True)
+
 # Yes, this lets AI execute arbitrary code. But we trust them, right?
 @mcp.tool()
-def build_and_run_code(entry, opt_level="0", args=[], input=None, iterations=100, profile=True) -> Dict:
+def build_and_run_code(entry, opt_level="0", run_args=[], input=None, iterations=100, profile=True, delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
     """
     Compiles the contents of the current workspace inside a docker container using `rustc`, and then
     runs the compiled binary with the provided arguments and input. Returns the logs, exit code, and metrics for the build and run.
@@ -130,10 +152,12 @@ def build_and_run_code(entry, opt_level="0", args=[], input=None, iterations=100
     Args:
         entry (str): The path to the Rust source file to compile, relative to the workspace root.
         opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "0")
-        args (List[str]): Arguments to pass to the compiled binary.
+        run_args (List[str]): Arguments to pass to the compiled binary.
         input (str): Input to pass to the compiled binary.
         iterations (int): Number of iterations to run the binary for. (Unimplemented)
         profile (bool): Whether to profile the run. (Unimplemented)
+        delete_volumes_on_exit (bool): Whether to delete the volumes after use.
+        delete_containers_on_exit (bool): Whether to delete the containers after use.
     """
     # Resolve path in workspace
     if os.path.isabs(entry):
@@ -144,70 +168,118 @@ def build_and_run_code(entry, opt_level="0", args=[], input=None, iterations=100
     # Pre-run clear artifact cache
     clear_artifact_cache()
 
-    # Prepare build command
-    binary_artifact = "/artifacts/bin/a.out"
-    build_cmd = ["rustc", entry, "-o", binary_artifact] + ["-C", f"opt-level={opt_level}"]
+    with DockerVolume(delete_on_exit=delete_volumes_on_exit) as (volume_name, session_id):
+        # Transfer over files to the docker volume and extract 
+        # TODO: Reorganize workspace and artifact so it's less of a mess
+        volume = docker_client.volumes.get(volume_name)
+        placer_container = None
+        try:
+            placer_container = docker_client.containers.run(
+                DOCKER_IMAGE,
+                name=f"placer_container_{session_id}",
+                command="sleep 3600",
+                working_dir="/workspace",
+                volumes={
+                    volume_name: {
+                        "bind": "/workspace",
+                        "mode": "rw"
+                    }
+                },
+                network_disabled=True,
+                detach=True,
+            )
 
-    docker_workspace = fix_docker_volume_path(WORKSPACE_ROOT)
-    docker_artifacts = fix_docker_volume_path(ARTIFACT_ROOT)
-    # Containerize build
-    build_container = docker_client.containers.run(
-        DOCKER_IMAGE,
-        command=build_cmd,
-        volumes={
-            docker_workspace: {
-                "bind": "/workspace",
-                "mode": "ro"
-            },
-            docker_artifacts: {
-                "bind": "/artifacts",
-                "mode": "rw"
-            }
-        },
-        working_dir="/workspace",
-        network_disabled=True,
-    )
+            workspace_buf = io.BytesIO()
+            with tarfile.open(fileobj=workspace_buf, mode="w") as tar:
+                tar.add(WORKSPACE_ROOT, arcname=".")
+                workspace_buf.seek(0)
+                placer_container.put_archive("/workspace", workspace_buf)
 
-    build_logs = build_container.logs(stdout=True, stderr=True).decode()
-    build_code = build_container.wait()["StatusCode"]
-    results = {
-            "build_success": build_code == 0,
-            "build_logs": build_logs,
-            "build_code": build_code
-    }
-    if not results["build_success"]:
-        # Build failed, return logs
-        return results
-
-    # Post run clear artifact cache
-    # Fix for input redirection
-    if input:
-        # Create an input file instead of using shell redirection
-        input_file = os.path.join(ARTIFACT_ROOT, "input.txt")
-        with open(input_file, "w") as f:
-            f.write(input)
+            placer_container.exec_run("mkdir -p /workspace/artifacts")
+            if input:
+                # Write input to the artifacts directory
+                with open(os.path.join(ARTIFACT_ROOT, "input.txt"), "w") as f:
+                    f.write(input)
+                # Copy input file to the docker volume
+                input_buf = io.BytesIO()
+                with tarfile.open(fileobj=input_buf, mode="w") as tar:
+                    tar.add(os.path.join(ARTIFACT_ROOT, "input.txt"), arcname="input.txt")        
+                    input_buf.seek(0)
+                    placer_container.put_archive("/workspace/artifacts", input_buf)
+        finally:
+            # Ensure the container is removed after use
+            if placer_container:
+                placer_container.remove(force=True)
         
-        # Use shell to handle input redirection
-        run_cmd = ["sh", "-c", f"/artifacts/bin/a.out {' '.join(args)} < /artifacts/input.txt"]
-    else:
-        run_cmd = ["/artifacts/bin/a.out"] + args
+        # Containerize build
+        # Prepare build command
+        binary_artifact = "/workspace/artifacts/a.out"
+        build_cmd = ["rustc", entry, "-o", binary_artifact] + ["-C", f"opt-level={opt_level}"]
 
-    run_container = docker_client.containers.run(
-        DOCKER_IMAGE,
-        command=[" ".join(run_cmd)],
-        volumes={
-            docker_artifacts: {
-                "bind": "/artifacts",
-                "mode": "rw"
-            }
-        },
-        working_dir="/artifacts",
-        network_disabled=True,
-    )
+        build_container = None
+        try:
+            build_container = docker_client.containers.run(
+                DOCKER_IMAGE,
+                name=f"build_container_{session_id}",
+                command=build_cmd,
+                volumes={
+                    volume_name: {
+                        "bind": "/workspace",
+                        "mode": "rw"
+                    },
+                },
+                working_dir="/workspace",
+                network_disabled=True,
+                detach=True,
+            )
+            build_code = build_container.wait()["StatusCode"]
+            build_logs = build_container.logs(stdout=True, stderr=True).decode()
+        finally:
+            # Ensure the container is removed after use
+            if build_container:
+                build_container.remove(force=True)
+        results = {
+                "build_success": build_code == 0,
+                "build_logs": build_logs,
+                "build_code": build_code
+        }
+        if not results["build_success"]:
+            # Build failed, return logs
+            return results
 
-    run_logs = run_container.logs(stdout=True, stderr=True).decode()
-    run_code = run_container.wait()["StatusCode"]
-    results["run_logs"] = run_logs
-    results["run_code"] = run_code
+        # Post run clear artifact cache
+        # Fix for input redirection
+        if input:
+            # Use shell to handle input redirection
+            run_cmd = ["sh", "-c", f"/workspace/artifacts/a.out {' '.join(run_args)} < /workspace/artifacts/input.txt"]
+        else:
+            run_cmd = ["/workspace/artifacts/a.out"] + run_args
 
-    return results
+        # Containerize run
+        run_container = None
+        try:
+            run_container = docker_client.containers.run(
+                DOCKER_IMAGE,
+                name=f"run_container_{session_id}",
+                command=run_cmd,
+                volumes={
+                    volume_name: {
+                        "bind": "/workspace",
+                        "mode": "rw"
+                    }
+                },
+                working_dir="/workspace",
+                network_disabled=True,
+                detach=True,
+            )
+
+            run_code = run_container.wait()["StatusCode"]
+            run_logs = run_container.logs(stdout=True, stderr=True).decode()
+            results["run_logs"] = run_logs
+            results["run_code"] = run_code
+        finally:
+            # Ensure the container is removed after use
+            if run_container:
+                run_container.remove(force=True)
+
+        return results
