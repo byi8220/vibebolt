@@ -221,6 +221,8 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
         # Prepare build command
         binary_artifact = "/workspace/artifacts/a.out"
         emission_types = []
+        if type(compile_args) is str:
+            compile_args = [compile_args]
         modified_compile_args = compile_args.copy()
         if "llvm_ir" in additional_compiler_outputs:
             emission_types.append("llvm-ir")
