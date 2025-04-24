@@ -144,7 +144,7 @@ class DockerVolume:
 
 # Yes, this lets AI execute arbitrary code. But we trust them, right?
 @mcp.tool()
-def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[], input=None,
+def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input=None,
                        build_env_vars={}, run_env_vars={}, additional_compiler_outputs=[],
                        iterations=100, profile=True, delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
     """
@@ -153,7 +153,7 @@ def build_and_run_code(entry, opt_level="0", compile_args=[], run_args=[], input
 
     Args:
         entry (str): The path to the Rust source file to compile, relative to the workspace root.
-        opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "0")
+        opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "2")
         compile_args (List[str]): Arguments to pass to the Rust compiler.
         run_args (List[str]): Arguments to pass to the compiled binary.
         input (str): Input to pass to the compiled binary.
