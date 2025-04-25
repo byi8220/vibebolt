@@ -18,7 +18,10 @@ os.makedirs(WORKSPACE_ROOT, exist_ok=True)
 os.makedirs(ARTIFACT_ROOT, exist_ok=True)
 
 mcp = FastMCP("Vibebolt Server")
-docker_client = docker.from_env()
+try:
+    docker_client = docker.from_env()
+except docker.errors.DockerException as e:
+    raise RuntimeError("Docker is not running or not accessible. Please ensure Docker is installed and running.") from e
 
 @mcp.resource("file://{path}")
 def file_read(path: str) -> str:
