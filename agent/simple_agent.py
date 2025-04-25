@@ -44,6 +44,14 @@ async def main(args):
                 # Only handle raw response text deltas
                 if event.type == "raw_response_event" and isinstance(event.data, ResponseTextDeltaEvent):
                     print(event.data.delta, end="", flush=True)  # prints each token as it arrives
+                if event.type == "run_item_stream_event":
+                    item = event.item
+                    tool_name = getattr(item.raw_item, "name", "")
+                    args_name = getattr(item.raw_item, "arugments", "")
+                    if item.type == "tool_call_item":
+                        print(f"\n Tool called: `{tool_name}` with args: ({args_name})", flush=True)
+                    elif item.type == "tool_call_output_item":
+                        print(item.output, flush=True)
             print()
     
 if __name__ == "__main__":
