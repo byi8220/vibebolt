@@ -1,8 +1,13 @@
 # Pretty much the most basic agent you could make for Vibebolt.
-# Maybe a second agent that returns feedback and can gather is in order.
+#
+# This is pretty ugly and has a lot of rough edges. I'd prefer that ChatGPT desktop had integrated tool use.
+# This agent iself is very dumb, and is absolutely not suitable for use, but it's a starting point for me to learn how to build better agents.
+# It also will burn straight through your OpenAI credits, so be careful with it.
 from agents import Agent, Runner
 from agents.mcp import MCPServerSse
 from openai.types.responses import ResponseTextDeltaEvent
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from openai import OpenAIError
 import os
 import argparse
 import asyncio
@@ -20,7 +25,46 @@ instructions =  """You are a coding assistant who is proficient in writing perfo
                 5. Consider time complexity, cache awareness, and low level optimizations while designing your code.
                 6. If you are repeatedly running into the same issues or error, reason about why this is happening.
                 7. Explain your reasoning step by step.
+                NOTE: Currently, you are limited to a single file. You cannot use any external libraries or modules.
                 """
+
+async def run_prompt(agent, prompt):
+    streaming_result = Runner.run_streamed(agent, prompt)
+    async for event in streaming_result.stream_events():
+        # Only handle raw response text deltas
+        if event.type == "raw_response_event" and isinstance(event.data, ResponseTextDeltaEvent):
+            print(event.data.delta, end="", flush=True)  # prints each token as it arrives
+        if event.type == "run_item_stream_event":
+            item = event.item
+            tool_name = getattr(item.raw_item, "name", "")
+            args_name = getattr(item.raw_item, "arguments", "")
+            if item.type == "tool_call_item":
+                print(f"\n Tool called: `{tool_name}` with args: ({args_name}) ", flush=True)
+            elif item.type == "tool_call_output_item":
+                print(item.output, flush=True)
+    print()
+
+# Annoyingly, the rate limit error doesn't actually seem to be a RateLimitError, but an OpenAIError.
+@retry(retry=retry_if_exception_type(OpenAIError), wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(100))
+async def retriable_run_prompt(agent, history): 
+    prompt = "".join(history)
+    streaming_result = Runner.run_streamed(agent, prompt)
+    async for event in streaming_result.stream_events():
+        # Only handle raw response text deltas
+        if event.type == "raw_response_event" and isinstance(event.data, ResponseTextDeltaEvent):
+            print(event.data.delta, end="", flush=True)  # prints each token as it arrives
+            history.append(event.data.delta)
+        if event.type == "run_item_stream_event":
+            item = event.item
+            tool_name = getattr(item.raw_item, "name", "")
+            args_name = getattr(item.raw_item, "arguments", "")
+            if item.type == "tool_call_item":
+                print(f"\n Tool called: `{tool_name}` with args: ({args_name}) ", flush=True)
+                history.append(f"\n Tool called: `{tool_name}` with args: ({args_name}) ")
+            elif item.type == "tool_call_output_item":
+                print(item.output, flush=True)
+                history.append(item.output)
+    print()
 
 async def main(args):
     sse_server = MCPServerSse(
@@ -37,22 +81,11 @@ async def main(args):
             instructions = instructions,
             mcp_servers=[server],
         )
+        history = []
         while True:
             prompt = input(">>>")
-            streaming_result = Runner.run_streamed(agent, prompt)
-            async for event in streaming_result.stream_events():
-                # Only handle raw response text deltas
-                if event.type == "raw_response_event" and isinstance(event.data, ResponseTextDeltaEvent):
-                    print(event.data.delta, end="", flush=True)  # prints each token as it arrives
-                if event.type == "run_item_stream_event":
-                    item = event.item
-                    tool_name = getattr(item.raw_item, "name", "")
-                    args_name = getattr(item.raw_item, "arugments", "")
-                    if item.type == "tool_call_item":
-                        print(f"\n Tool called: `{tool_name}` with args: ({args_name})", flush=True)
-                    elif item.type == "tool_call_output_item":
-                        print(item.output, flush=True)
-            print()
+            history.append(prompt)
+            await retriable_run_prompt(agent, history)
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
