@@ -3,6 +3,8 @@ Vibe code some Rust!
 
 Vibebolt is an experimental MCP vibe coding framework that specializes in writing small samples of Rust code.
 
+NOTE: This is a pretty crude implementation and might melt your quota (and the polar ice caps).
+
 NOTE: Even if sandboxed, `vibebolt` is still running arbitrary code within a docker container inside the host machine. Use with caution.
 
 ## Prerequisites
