@@ -154,12 +154,12 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
     Args:
         entry (str): The path to the Rust source file to compile, relative to the workspace root.
         opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "2")
+        additional_compiler_outputs (List[str]): Additional compiler outputs to emit. Possible values are "llvm_ir", "asm", "mir".
         compile_args (List[str]): Arguments to pass to the Rust compiler.
         run_args (List[str]): Arguments to pass to the compiled binary.
         input (str): Input to pass to the compiled binary.
         build_env_vars (Dict[str, str]): Environment variables to set for the build container.
         run_env_vars (Dict[str, str]): Environment variables to set for the run container.
-        additional_compiler_outputs (List[str]): Additional compiler outputs to emit. Possible values are "llvm_ir", "asm", "mir".
         iterations (int): Number of iterations to run the binary for. (Unimplemented)
         profile (bool): Whether to profile the run. (Unimplemented)
         delete_volumes_on_exit (bool): Whether to delete the volumes after use.
@@ -214,7 +214,7 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
                     placer_container.put_archive("/workspace/artifacts", input_buf)
         finally:
             # Ensure the container is removed after use
-            if placer_container:
+            if placer_container and delete_containers_on_exit:
                 placer_container.remove(force=True)
         
         # Containerize build
@@ -223,6 +223,12 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
         emission_types = []
         if type(compile_args) is str:
             compile_args = [compile_args]
+
+        if any(arg.contains("--emit") for arg in compile_args):
+            raise ValueError("Do not manually specify the `--emit` compiler flag in compile_args. Specify `additional_compiler_outputs` instead.")
+        if any(arg.contains("opt-level") for arg in compile_args):
+            raise ValueError("Do not manually specify the `opt-level` compiler flag in compile_args. Specify `opt_level` instead.")
+
         modified_compile_args = compile_args.copy()
         if "llvm_ir" in additional_compiler_outputs:
             emission_types.append("llvm-ir")
@@ -256,7 +262,7 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
             build_logs = build_container.logs(stdout=True, stderr=True).decode()
         finally:
             # Ensure the container is removed after use
-            if build_container:
+            if build_container and delete_containers_on_exit:
                 build_container.remove(force=True)
         results = {
                 "build_success": build_code == 0,
@@ -300,7 +306,7 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
             results["run_code"] = run_code
         finally:
             # Ensure the container is removed after use
-            if run_container:
+            if run_container and delete_containers_on_exit:
                 run_container.remove(force=True)
 
         # Collect additional outputs if requested
