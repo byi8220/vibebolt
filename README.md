@@ -1,11 +1,11 @@
 # vibebolt
 Vibe code some Rust!
 
-Vibebolt is an experimental MCP vibe coding framework that specializes in writing small samples of Rust code.
+Vibebolt is an experimental MCP server which enables you to write and execute Rust code within a docker container. 
 
 NOTE: This is a pretty crude implementation and might melt your quota (and the polar ice caps).
 
-NOTE: Even if sandboxed, `vibebolt` is still running arbitrary code within a docker container inside the host machine. Use with caution.
+NOTE: Even if sandboxed, `vibebolt` is still running arbitrary code within a docker container inside the host machine. Use with caution. I've noticed other servers seem to be *way* more comfortable letting a server execute commands on the terminal.
 
 ## Prerequisites
 Python 3 (TODO: Figure out minimum working version)

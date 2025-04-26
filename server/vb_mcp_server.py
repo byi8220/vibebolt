@@ -146,28 +146,9 @@ class DockerVolume:
             docker_client.volumes.get(self.volume_name).remove(force=True)
 
 # Yes, this lets AI execute arbitrary code. But we trust them, right?
-@mcp.tool()
 def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input=None,
                        build_env_vars={}, run_env_vars={}, additional_compiler_outputs=[],
-                       iterations=100, profile=True, delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
-    """
-    Compiles the contents of the current workspace inside a docker container using `rustc`, and then
-    runs the compiled binary with the provided arguments and input. Returns the logs, exit code, and metrics for the build and run.
-
-    Args:
-        entry (str): The path to the Rust source file to compile, relative to the workspace root.
-        opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "2")
-        additional_compiler_outputs (List[str]): Additional compiler outputs to emit. Possible values are "llvm_ir", "asm", "mir".
-        compile_args (List[str]): Arguments to pass to the Rust compiler.
-        run_args (List[str]): Arguments to pass to the compiled binary.
-        input (str): Input to pass to the compiled binary.
-        build_env_vars (Dict[str, str]): Environment variables to set for the build container.
-        run_env_vars (Dict[str, str]): Environment variables to set for the run container.
-        iterations (int): Number of iterations to run the binary for. (Unimplemented)
-        profile (bool): Whether to profile the run. (Unimplemented)
-        delete_volumes_on_exit (bool): Whether to delete the volumes after use.
-        delete_containers_on_exit (bool): Whether to delete the containers after use.
-    """
+                       delete_volumes_on_exit=True, delete_containers_on_exit=True, only_get_asm=False) -> Dict:
     # Resolve path in workspace
     if os.path.isabs(entry):
         raise ValueError("`entry` must be relative")
@@ -285,32 +266,33 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
             run_cmd = ["/workspace/artifacts/a.out"] + run_args
 
         # Containerize run
-        run_container = None
-        try:
-            run_container = docker_client.containers.run(
-                DOCKER_IMAGE,
-                name=f"run_container_{session_id}",
-                command=run_cmd,
-                volumes={
-                    volume_name: {
-                        "bind": "/workspace",
-                        "mode": "rw"
-                    }
-                },
-                environment=run_env_vars,
-                working_dir="/workspace",
-                network_disabled=True,
-                detach=True,
-            )
+        if not only_get_asm:
+            run_container = None
+            try:
+                run_container = docker_client.containers.run(
+                    DOCKER_IMAGE,
+                    name=f"run_container_{session_id}",
+                    command=run_cmd,
+                    volumes={
+                        volume_name: {
+                            "bind": "/workspace",
+                            "mode": "rw"
+                        }
+                    },
+                    environment=run_env_vars,
+                    working_dir="/workspace",
+                    network_disabled=True,
+                    detach=True,
+                )
 
-            run_code = run_container.wait()["StatusCode"]
-            run_logs = run_container.logs(stdout=True, stderr=True).decode()
-            results["run_logs"] = run_logs
-            results["run_code"] = run_code
-        finally:
-            # Ensure the container is removed after use
-            if run_container and delete_containers_on_exit:
-                run_container.remove(force=True)
+                run_code = run_container.wait()["StatusCode"]
+                run_logs = run_container.logs(stdout=True, stderr=True).decode()
+                results["run_logs"] = run_logs
+                results["run_code"] = run_code
+            finally:
+                # Ensure the container is removed after use
+                if run_container and delete_containers_on_exit:
+                    run_container.remove(force=True)
 
         # Collect additional outputs if requested
         def extract_file_from_archive(archive_bits):
@@ -407,3 +389,51 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
 
 
         return results
+
+@mcp.tool()
+def build_and_run(entry, opt_level="2", compile_args=[], run_args=[], input=None,
+                       build_env_vars={}, run_env_vars={}, additional_compiler_outputs=[],
+                       delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
+    """
+    Compiles the contents of the current workspace inside a docker container using `rustc`, and then
+    runs the compiled binary with the provided arguments and input. Returns the logs, exit code, and metrics for the build and run.
+
+    Args:
+        entry (str): The path to the Rust source file to compile, relative to the workspace root.
+        opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "2")
+        additional_compiler_outputs (List[str]): Additional compiler outputs to emit. Possible values are "llvm_ir", "asm", "mir".
+        compile_args (List[str]): Arguments to pass to the Rust compiler.
+        run_args (List[str]): Arguments to pass to the compiled binary.
+        input (str): Input to pass to the compiled binary.
+        build_env_vars (Dict[str, str]): Environment variables to set for the build container.
+        run_env_vars (Dict[str, str]): Environment variables to set for the run container.
+        delete_volumes_on_exit (bool): Whether to delete the volumes after use.
+        delete_containers_on_exit (bool): Whether to delete the containers after use.
+    """
+    return build_and_run_code(entry, opt_level, compile_args, run_args, input,
+                              build_env_vars, run_env_vars, additional_compiler_outputs,
+                              delete_volumes_on_exit, delete_containers_on_exit)
+@mcp.tool()
+def get_asm(entry, opt_level="2", compile_args=[], run_args=[], input=None,
+                       build_env_vars={}, run_env_vars={},
+                       delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
+    """
+    Compiles the contents of the current workspace inside a docker container using `rustc`, and then
+    returns the llvm_ir, asm, mir outputs.
+
+    Args:
+        entry (str): The path to the Rust source file to compile, relative to the workspace root.
+        opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "2")
+        compile_args (List[str]): Arguments to pass to the Rust compiler.
+        run_args (List[str]): Arguments to pass to the compiled binary.
+        input (str): Input to pass to the compiled binary.
+        build_env_vars (Dict[str, str]): Environment variables to set for the build container.
+        run_env_vars (Dict[str, str]): Environment variables to set for the run container.
+        delete_volumes_on_exit (bool): Whether to delete the volumes after use.
+        delete_containers_on_exit (bool): Whether to delete the containers after use.
+    """
+    return build_and_run_code(entry, opt_level, compile_args, run_args, input,
+                              build_env_vars, run_env_vars, ["llvm_ir", "asm", "mir"],
+                              delete_volumes_on_exit, delete_containers_on_exit, only_get_asm=True)
+
+                       
