@@ -208,9 +208,9 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
         if type(compile_args) is str:
             compile_args = [compile_args]
 
-        if any(arg.contains("--emit") for arg in compile_args):
-            raise ValueError("Do not manually specify the `--emit` compiler flag in compile_args. Specify `additional_compiler_outputs` instead.")
-        if any(arg.contains("opt-level") for arg in compile_args):
+        if any("--emit" in arg for arg in compile_args):
+            raise ValueError("Do not manually specify the `--emit` compiler flag in compile_args. Specify `additional_compiler_outputs` instead, or use `get_asm`.")
+        if any("opt-level" in arg for arg in compile_args):
             raise ValueError("Do not manually specify the `opt-level` compiler flag in compile_args. Specify `opt_level` instead.")
 
         modified_compile_args = compile_args.copy()
@@ -331,7 +331,7 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
                 )
                 
                 # Get the base name of the entry file (without extension)
-                base_name = os.path.splitext(entry)[0]
+                base_name = "/workspace/artifacts/a"
                 additional_outputs = {}
                 
                 # Extract and process each requested output type
@@ -342,7 +342,7 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
                         # First check if file exists
                         exit_code, _ = extractor_container.exec_run(f"test -f {ir_path}")
                         if exit_code == 0:  # File exists
-                            bits, _ = extractor_container.get_archive(f"/workspace/{ir_path}")
+                            bits, _ = extractor_container.get_archive(f"{ir_path}")
                             # Extract the file content
                             file_content = extract_file_from_archive(bits)
                             if file_content:
@@ -356,7 +356,7 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
                     try:
                         exit_code, _ = extractor_container.exec_run(f"test -f {asm_path}")
                         if exit_code == 0:  # File exists
-                            bits, _ = extractor_container.get_archive(f"/workspace/{asm_path}")
+                            bits, _ = extractor_container.get_archive(f"{asm_path}")
                             # Extract the file content
                             file_content = extract_file_from_archive(bits)
                             if file_content:
@@ -370,7 +370,7 @@ def build_and_run_code(entry, opt_level="2", compile_args=[], run_args=[], input
                     try:
                         exit_code, _ = extractor_container.exec_run(f"test -f {mir_path}")
                         if exit_code == 0:  # File exists
-                            bits, _ = extractor_container.get_archive(f"/workspace/{mir_path}")
+                            bits, _ = extractor_container.get_archive(f"{mir_path}")
                             # Extract the file content
                             file_content = extract_file_from_archive(bits)
                             if file_content:
@@ -416,7 +416,7 @@ def build_and_run(entry, opt_level="2", compile_args=[], run_args=[], input=None
 @mcp.tool()
 def get_asm(entry, opt_level="2", compile_args=[], run_args=[], input=None,
                        build_env_vars={}, run_env_vars={},
-                       delete_volumes_on_exit=True, delete_containers_on_exit=True) -> Dict:
+                       delete_volumes_on_exit=False, delete_containers_on_exit=True) -> Dict:
     """
     Compiles the contents of the current workspace inside a docker container using `rustc`, and then
     returns the llvm_ir, asm, mir outputs.
