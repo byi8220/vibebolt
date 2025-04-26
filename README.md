@@ -3,6 +3,8 @@ Vibe code some Rust!
 
 Vibebolt is an experimental MCP server which enables you to write and execute Rust code within a docker container. 
 
+It's pretty bare bones. Currently it can only compile a single file at a time, has to write that file all at once, and doesn't support any external libraries. Honestly, it's just kinda fun to watch Claude go as it iteratively writes code, runs into a bug or compile error, and iteratively works on fixing it (it doesn't always).
+
 NOTE: This is a pretty crude implementation and might melt your quota (and the polar ice caps).
 
 NOTE: Even if sandboxed, `vibebolt` is still running arbitrary code within a docker container inside the host machine. Use with caution. I've noticed other servers seem to be *way* more comfortable letting a server execute commands on the terminal.
