@@ -398,6 +398,8 @@ def build_and_run(entry, opt_level="2", compile_args=[], run_args=[], input=None
     Compiles the contents of the current workspace inside a docker container using `rustc`, and then
     runs the compiled binary with the provided arguments and input. Returns the logs, exit code, and metrics for the build and run.
 
+    NOTE: The sandbox does NOT support any external libraries or modules.
+
     Args:
         entry (str): The path to the Rust source file to compile, relative to the workspace root.
         opt_level (str): The optimization level to use for the Rust compiler. Possible levels are 0-3, s, or z (default: "2")
@@ -420,6 +422,8 @@ def get_asm(entry, opt_level="2", compile_args=[], run_args=[], input=None,
     """
     Compiles the contents of the current workspace inside a docker container using `rustc`, and then
     returns the llvm_ir, asm, mir outputs.
+
+    NOTE: The sandbox does NOT support any external libraries or modules.
 
     Args:
         entry (str): The path to the Rust source file to compile, relative to the workspace root.
